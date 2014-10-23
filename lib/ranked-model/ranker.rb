@@ -4,14 +4,13 @@ module RankedModel
   class InvalidField < StandardError; end
 
   class Ranker
-    attr_accessor :name, :column, :scope, :with_same, :class_name, :unless
+    attr_accessor :name, :column, :scope, :with_same, :class_name, :unless, :update_timestamps
 
     def initialize name, options={}
       self.name = name.to_sym
       self.column = options[:column] || name
-      self.class_name = options[:class_name]
 
-      [ :scope, :with_same, :unless ].each do |key|
+      [ :class_name, :scope, :with_same, :unless, :update_timestamps ].each do |key|
         self.send "#{key}=", options[key]
       end
     end
@@ -66,7 +65,7 @@ module RankedModel
         #
         instance_class.
           where(instance_class.primary_key => instance.id).
-          update_all([%Q{#{ranker.column} = ?}, value])
+          update_all( update_sql_clause(value) )
       end
 
       def position
@@ -108,6 +107,24 @@ module RankedModel
 
       def new_record?
         instance.new_record?
+      end
+
+      def update_sql_clause(new_rank)
+        sql_clause = case new_rank
+        when :decrease_by_one
+          [%Q{#{ranker.column} = #{ranker.column} - 1}]
+        when :increase_by_one
+          [%Q{#{ranker.column} = #{ranker.column} + 1}]
+        else
+          [%Q{#{ranker.column} = ?}, new_rank]
+        end
+
+        if ranker.update_timestamps
+          sql_clause.first << ", updated_at = ?"
+          sql_clause << DateTime.now
+        end
+
+        sql_clause
       end
 
       def update_index_from_position
@@ -177,15 +194,15 @@ module RankedModel
         if current_first.rank && current_first.rank > RankedModel::MIN_RANK_VALUE && rank == RankedModel::MAX_RANK_VALUE
           _scope.
             where( instance_class.arel_table[ranker.column].lteq(rank) ).
-            update_all( %Q{#{ranker.column} = #{ranker.column} - 1} )
+            update_all( update_sql_clause(:decrease_by_one) )
         elsif current_last.rank && current_last.rank < (RankedModel::MAX_RANK_VALUE - 1) && rank < current_last.rank
           _scope.
             where( instance_class.arel_table[ranker.column].gteq(rank) ).
-            update_all( %Q{#{ranker.column} = #{ranker.column} + 1} )
+            update_all( update_sql_clause(:increase_by_one) )
         elsif current_first.rank && current_first.rank > RankedModel::MIN_RANK_VALUE && rank > current_first.rank
           _scope.
             where( instance_class.arel_table[ranker.column].lt(rank) ).
-            update_all( %Q{#{ranker.column} = #{ranker.column} - 1} )
+            update_all( update_sql_clause(:decrease_by_one) )
           rank_at( rank - 1 )
         else
           rebalance_ranks
