@@ -229,6 +229,8 @@ module RankedModel
           end
           current_order[index].update_rank! rank_value
         end
+
+        instance.rebalanced_ranks if instance.respond_to?(:rebalanced_ranks)
       end
 
       def finder(order = :asc)
